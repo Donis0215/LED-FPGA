@@ -1,3 +1,79 @@
+Here is the professional English translation of your README, optimized for a GitHub portfolio to impress recruiters and engineers.
+
+FPGA Logic Design & Digital System Implementation 🚀
+A Comprehensive Journey from Basic Logic to System Integration with Verilog
+This repository documents my progression in FPGA development and Verilog HDL, moving from fundamental LED shift controls to complex systems involving matrix keypad scanning, multiplexed display systems, and Finite State Machine (FSM) design.
+
+📂 Project Roadmap
+🟢 Phase 1: Sequential Logic & Clock Management (Basics)
+Lab 1: LED Scroller Series
+
+Level 1 (Basic): Implemented an 8-bit Circular Shift Register using concatenation operators ({shift_out[0], shift_out[7:1]}).
+
+Level 2 (State Control): Introduced 9-bit state control to achieve a "Ping-Pong" bouncing LED effect.
+
+Level 3 (Pattern Design): Expanded logic to a 3-bit "Meteor/Comet" pattern for enhanced visual dynamics.
+
+Level 4 (Dual-Color): Integrated Red/Green dual-color LEDs, utilizing the Most Significant Bit (MSB) as a toggle for color and direction.
+
+Key Technologies: Clock Dividers, Concatenation Operators, Circular Shift Registers.
+
+🟡 Phase 2: Decoding & Counting Systems (Display & Counter)
+Lab 2-1: BCD Decoder
+
+Developed a static 7-segment decoder to map 4-bit BCD (Binary Coded Decimal) inputs to hardware segments (a-g). Lab 2-2: Decade Counter
+
+Implemented a 0-9 counter with a Carry out signal, serving as the fundamental unit for digital clock systems. Lab 2-3: 00-99 Multiplexed Counter
+
+Major Breakthrough: Introduced Time-Division Multiplexing (TDM).
+
+Used a single decoder to drive multiple displays via high-frequency switching, significantly reducing I/O pin requirements.
+
+Key Technologies: Combinational MUX, Time-Division Multiplexing (TDM), Persistence of Vision (POV).
+
+🟠 Phase 3: Array Scanning & Font Visualization (Matrix Display)
+Lab 4-1: 8x8 Dot Matrix Controller
+
+Implemented Font ROM lookup table (LUT) logic.
+
+Utilized a dual-clock system (clk_scan and clk_shift) to simultaneously handle high-speed row scanning and low-speed character shifting.
+
+Key Technologies: Memory Mapping (1D to 2D), Scanning Logic, ROM-based Lookup Tables.
+
+🔴 Phase 4: System Integration & Human-Machine Interface (HMI)
+Lab 5 & 6: Matrix Keyboard System
+
+Matrix Scanning: Implemented a 3x4 keypad scanning circuit to minimize I/O footprint.
+
+Hardware Debouncing: Utilized multi-stage shift registers to filter mechanical noise, ensuring precise input detection.
+
+Data Buffering: Developed a "Left-Shift Buffer" logic (Shift-In from Right) to emulate real-world calculator input behavior.
+
+Key Technologies: Finite State Machines (FSM), Input Debouncing, Sequential Latching.
+
+🔵 Advanced Topics: Finite State Machines (FSM Theory)
+FSM1: Mealy Machine Design
+
+Implemented using the industry-standard Two-Block Coding Style (Sequential state transitions + Combinational next-state/output logic).
+
+Demonstrated real-time logic response between state transitions and Input/Output mapping.
+
+Key Technologies: Mealy Machine, State Encoding, Asynchronous Reset.
+
+🛠 Tools & Environment
+Language: Verilog HDL
+
+Hardware Platform: FPGA (Altera/Intel Cyclone Series)
+
+Development Tools: Quartus Prime / ModelSim
+
+💡 Technical Core Summary
+Timing Control: Proficient in managing multiple Clock Domains using parameterized frequency dividers.
+
+Hardware Optimization: Experienced in using MUX and TDM techniques to implement multi-digit displays under constrained hardware resources.
+
+Robust Design: Capable of ensuring system stability on physical hardware through Hardware Debouncing and Synchronous Sequential Design.
+
 FPGA Logic Design & Digital System Implementation
 🚀 從基礎門檻到系統整合的 Verilog 實作歷程
 本倉庫紀錄了我學習 FPGA 與 Verilog HDL 的完整進階過程。從最基礎的 LED 移位控制，逐步發展到矩陣鍵盤掃描、多工顯示系統以及有限狀態機 (FSM) 的設計。
