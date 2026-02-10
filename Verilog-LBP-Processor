@@ -1,0 +1,188 @@
+`timescale 1ns/10ps
+
+module LBP (
+    input wire clk,
+    input wire reset,
+    output reg [13:0] gray_addr,
+    output reg gray_req,
+    input wire gray_ready,
+    input wire [7:0] gray_data,
+    output reg [13:0] lbp_addr,
+    output reg lbp_valid,
+    output reg [7:0] lbp_data,
+    output reg finish
+);
+
+    //================================================================
+    // 參數與狀態定義
+    //================================================================
+    localparam IDLE   = 3'd0;
+    localparam REQ    = 3'd1; // 請求中心點
+    localparam CAL    = 3'd2; // 接收中心點 -> 請求鄰居 -> 計算
+    localparam WRITE  = 3'd3; // 輸出結果
+    localparam DONE   = 3'd4; // 結束
+
+    reg [2:0] current_state, next_state;
+
+    // 內部暫存器
+    reg [6:0] x, y;
+    reg [3:0] cnt;
+    reg [7:0] gc;
+    reg [7:0] lbp_val;
+
+    // 邊界判斷
+    wire at_boundary = (x == 7'd0 || x == 7'd127 || y == 7'd0 || y == 7'd127);
+    wire is_last     = (x == 7'd127 && y == 7'd127);
+
+    //================================================================
+    // FSM 狀態轉移
+    //================================================================
+    always @(posedge clk or posedge reset) begin
+        if (reset) current_state <= IDLE;
+        else       current_state <= next_state;
+    end
+
+    //================================================================
+    // 次態邏輯
+    //================================================================
+    always @(*) begin
+        case (current_state)
+            IDLE:    next_state = (gray_ready) ? REQ : IDLE;
+
+            REQ: begin
+                // 邊界保護第一層：如果是邊界，直接跳去輸出 0，根本不進 CAL
+                if (at_boundary) next_state = WRITE;
+                else             next_state = CAL;
+            end
+
+            CAL: begin
+                if (cnt == 4'd8) next_state = WRITE;
+                else             next_state = CAL;
+            end
+
+            WRITE: begin
+                if (is_last) next_state = DONE;
+                else         next_state = REQ;
+            end
+
+            DONE:    next_state = DONE;
+            default: next_state = IDLE;
+        endcase
+    end
+
+    //================================================================
+    // 資料路徑 (Datapath)
+    //================================================================
+
+    // cnt 控制
+    always @(posedge clk or posedge reset) begin
+        if (reset) cnt <= 4'd0;
+        else if (current_state == CAL) cnt <= cnt + 1;
+        else cnt <= 4'd0;
+    end
+
+    // 中心點 gc 抓取
+    // 雖然 REQ 發了請求，但如果遇到邊界跳過 CAL，這行也不會執行，很安全
+    always @(posedge clk or posedge reset) begin
+        if (reset) gc <= 8'd0;
+        else if (current_state == CAL && cnt == 4'd0) gc <= gray_data;
+    end
+
+    // LBP 累加運算
+    always @(posedge clk or posedge reset) begin
+        if (reset) lbp_val <= 8'd0;
+        else if (current_state == REQ) lbp_val <= 8'd0;
+        else if (current_state == CAL) begin
+            // 修改 lbp_val 的運算區塊
+if (cnt >= 4'd1 && cnt <= 4'd8) begin  // 改回 1~8
+    if (gray_data >= gc)
+        lbp_val <= lbp_val + (8'd1 << (cnt - 1)); // 改回 shift (cnt-1)
+end
+        end
+    end
+
+    // 座標控制 (0~127 全掃描)
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            x <= 7'd0; y <= 7'd0;
+        end else begin
+            if (current_state == WRITE && !is_last) begin
+                if (x == 7'd127) begin
+                    x <= 7'd0;
+                    if (y != 7'd127) y <= y + 1;
+                end else begin
+                    x <= x + 1;
+                end
+            end
+        end
+    end
+
+    //================================================================
+    // 地址產生 (gray_addr) - 【這裡加了你擔心的邊界保護】
+    //================================================================
+    always @(*) begin
+        case (current_state)
+            REQ: gray_addr = {y, x}; // 發送中心點
+
+            CAL: begin
+                // 【時序對齊核心】
+                // 這裡決定了 gc 會不會抓錯，以及鄰居是不是對應正確的 cnt
+                case (cnt)
+                    // cnt=0: 強制保持中心地址！等 Negedge 資料穩定
+                    4'd0: gray_addr = {y, x};      
+                    
+                    // cnt=1~8: 依序發送 8 個鄰居地址
+                    4'd1: gray_addr = {y-7'd1, x-7'd1}; // P0
+                    4'd2: gray_addr = {y-7'd1, x};      // P1
+                    4'd3: gray_addr = {y-7'd1, x+7'd1}; // P2
+                    4'd4: gray_addr = {y, x-7'd1};      // P3
+                    4'd5: gray_addr = {y, x+7'd1};      // P4
+                    4'd6: gray_addr = {y+7'd1, x-7'd1}; // P5
+                    4'd7: gray_addr = {y+7'd1, x};      // P6
+                    4'd8: gray_addr = {y+7'd1, x+7'd1}; // P7
+                    
+                    default: gray_addr = {y, x};
+                endcase
+                end endcase
+            end
+    //================================================================
+    // 輸出訊號
+    //================================================================
+
+    // gray_req
+    always @(*) begin
+        if (current_state == REQ || (current_state == CAL))
+            gray_req = 1'b1;
+        else
+            gray_req = 1'b0;
+    end
+
+    // lbp_valid & lbp_data
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            lbp_valid <= 1'b0;
+            lbp_data  <= 8'd0;
+            lbp_addr  <= 14'd0;
+        end else begin
+            if (current_state == WRITE) begin
+                lbp_valid <= 1'b1;
+                lbp_addr  <= {y, x};
+
+                // 邊界直接輸出 0
+                if (at_boundary) lbp_data <= 8'd0;
+                else             lbp_data <= lbp_val;
+
+            end else begin
+                lbp_valid <= 1'b0;
+                lbp_data  <= 8'd0;
+            end
+        end
+    end
+
+    // finish
+    always @(posedge clk or posedge reset) begin
+        if (reset) finish <= 1'b0;
+        else if (current_state == DONE) finish <= 1'b1;
+    end
+
+endmodule
