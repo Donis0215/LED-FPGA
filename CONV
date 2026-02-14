@@ -1,0 +1,205 @@
+`timescale 1ns/10ps
+
+module CONV(
+    input           clk,
+    input           reset,
+    output reg      busy,   
+    input           ready,  
+            
+    output reg [11:0] iaddr,
+    input      [19:0] idata,  
+    
+    output reg        cwr,
+    output reg [11:0] caddr_wr,
+    output reg [19:0] cdata_wr,
+    
+    output reg        crd,
+    output reg [11:0] caddr_rd,
+    input      [19:0] cdata_rd,
+    
+    output reg [2:0]  csel
+    );
+
+    // ... 參數定義 ...
+    localparam IDLE = 3'd0, L0_CALC = 3'd1, L0_WRITE = 3'd2;
+    localparam L1_ENABLE = 3'd3, L1_CALC = 3'd4, L1_WRITE = 3'd5, FINISH = 3'd6;
+    localparam signed [19:0] BIAS = 20'h01310; 
+
+    // --- Pipeline Registers ---
+    reg signed [19:0] idata_d1;     
+    reg               is_pad_d0;    
+    reg               is_pad_d1;    
+
+    // --- KERNEL ---
+    wire signed [19:0] KERNEL [0:8];
+    assign KERNEL[0] = 20'h0A89E; assign KERNEL[1] = 20'h092D5; assign KERNEL[2] = 20'h06D43;
+    assign KERNEL[3] = 20'h01004; assign KERNEL[4] = 20'hF8F71; assign KERNEL[5] = 20'hF6E54;
+    assign KERNEL[6] = 20'hFA6D7; assign KERNEL[7] = 20'hFC834; assign KERNEL[8] = 20'hFAC19;
+
+    reg [2:0]  current_state;
+    reg [3:0]  cnt;                 
+    reg [5:0]  x, y;   
+    reg signed [44:0] acc;          
+    reg signed [19:0] max_val;  
+
+    // ==========================================================
+    // [變數宣告區] 所有中間運算變數都要放在這裡！
+    // ==========================================================
+    reg signed [7:0] target_x_comb, target_y_comb; // Layer 0 組合邏輯用
+    wire is_pad_comb;
+    
+    // [修正] 將 Layer 1 的變數宣告移到這裡
+    reg signed [7:0] tx_l1, ty_l1; 
+    reg signed [1:0] off_x, off_y;
+    // ==========================================================
+    // Combinational Block: 地址計算與 Padding 判斷
+    // ==========================================================
+    always @(*) begin
+        // 1. 根據 cnt 查表 (LUT) - 解決 APR Delay
+        
+        case(cnt)
+            4'd0: begin off_x = -2'sd1; off_y = -2'sd1; end
+            4'd1: begin off_x =  2'sd0; off_y = -2'sd1; end
+            4'd2: begin off_x =  2'sd1; off_y = -2'sd1; end
+            4'd3: begin off_x = -2'sd1; off_y =  2'sd0; end
+            4'd4: begin off_x =  2'sd0; off_y =  2'sd0; end
+            4'd5: begin off_x =  2'sd1; off_y =  2'sd0; end
+            4'd6: begin off_x = -2'sd1; off_y =  2'sd1; end
+            4'd7: begin off_x =  2'sd0; off_y =  2'sd1; end
+            4'd8: begin off_x =  2'sd1; off_y =  2'sd1; end
+            default: begin off_x = 0; off_y = 0; end
+        endcase
+
+        // 2. 即時計算目標座標
+        target_x_comb = $signed({2'b0, x}) + $signed(off_x);
+        target_y_comb = $signed({2'b0, y}) + $signed(off_y);
+    end
+
+    // 3. 即時判斷 Padding
+    assign is_pad_comb = (target_x_comb[7] || target_y_comb[7] || target_x_comb > 63 || target_y_comb > 63);
+
+    // ==========================================================
+    // Pipeline 更新邏輯
+    // ==========================================================
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            idata_d1  <= 20'd0;
+            is_pad_d0 <= 1'b0;
+            is_pad_d1 <= 1'b0;
+        end else if (current_state == L0_CALC) begin
+            idata_d1  <= idata;       
+            is_pad_d0 <= is_pad_comb; 
+            is_pad_d1 <= is_pad_d0;
+        end
+    end
+
+    // ==========================================================
+    // FSM 主控制邏輯
+    // ==========================================================
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            current_state <= IDLE;
+            busy <= 0; cnt <= 0; x <= 0; y <= 0;
+            acc <= 0; max_val <= 0;
+            cwr <= 0; crd <= 0; csel <= 0;
+            iaddr <= 0; caddr_wr <= 0; caddr_rd <= 0; cdata_wr <= 0;
+        end else begin
+            case (current_state)
+            
+                IDLE: begin
+                    if (ready) begin
+                        busy <= 1; x <= 0; y <= 0; cnt <= 0; acc <= 0;
+                        current_state <= L0_CALC;
+                    end
+                end
+
+                L0_CALC: begin
+                    cwr <= 0;
+
+                    // 1. 發送地址請求
+                    if (cnt < 9) begin
+                        if (is_pad_comb) iaddr <= 12'd0; 
+                        else             iaddr <= {target_y_comb[5:0], target_x_comb[5:0]};
+                    end
+                    
+                    // 2. 接收資料並累加 (Pipeline)
+                    if (cnt >= 2 && cnt <= 10) begin
+                        if (is_pad_d1) acc <= acc; 
+                        else           acc <= acc + (idata_d1 * KERNEL[cnt-2]);
+                    end
+
+                    // 3. 狀態跳轉
+                    if (cnt == 10) begin
+                        current_state <= L0_WRITE;
+                        cnt <= 0;
+                    end else begin
+                        cnt <= cnt + 1;
+                    end
+                end
+
+                L0_WRITE: begin
+                    csel <= 3'b001; cwr <= 1;
+                    caddr_wr <= {y[5:0], x[5:0]};
+                    if ( ($signed(acc) + $signed({BIAS, 16'b0})) < 0 )
+                        cdata_wr <= 20'd0;
+                    else
+                        cdata_wr <= ($signed(acc) + $signed({BIAS, 16'b0}) + 45'h00000008000) >>> 16;
+                    
+                    acc <= 0; 
+                    
+                    if (x == 63) begin
+                        x <= 0;
+                        if (y == 63) begin y <= 0; current_state <= L1_ENABLE; end 
+                        else begin y <= y + 1; current_state <= L0_CALC; end
+                    end else begin
+                        x <= x + 1; current_state <= L0_CALC;
+                    end
+                end
+
+                L1_ENABLE: begin
+                    cwr <= 0; crd <= 0; csel <= 3'b001; cnt <= 0;
+                    current_state <= L1_CALC;
+                end
+
+                L1_CALC: begin
+                    crd <= 1;
+                    
+                    // [修正] 這裡直接計算，變數已經在上面宣告過了
+                    if (cnt < 4) begin
+                        tx_l1 = $signed({2'b0, x, 1'b0}) + $signed({7'b0, cnt[0]}); 
+                        ty_l1 = $signed({2'b0, y, 1'b0}) + $signed({7'b0, cnt[1]}); 
+                        caddr_rd <= {ty_l1[5:0], tx_l1[5:0]};
+                    end
+
+                    if (cnt > 0) begin
+                        if (cnt == 1) max_val <= cdata_rd;
+                        else if ($signed(cdata_rd) > $signed(max_val)) max_val <= cdata_rd;
+                    end
+                    if (cnt == 4) current_state <= L1_WRITE;
+                    else          cnt <= cnt + 1;
+                end
+
+                L1_WRITE: begin
+                    crd <= 0; csel <= 3'b011; cwr <= 1;
+                    caddr_wr <= {y[4:0], x[4:0]};
+                    cdata_wr <= max_val;
+                    max_val <= 0; 
+                    if (x == 31) begin
+                        x <= 0;
+                        if (y == 31) current_state <= FINISH; 
+                        else begin y <= y + 1; current_state <= L1_ENABLE; end
+                    end else begin
+                        x <= x + 1; current_state <= L1_ENABLE;
+                    end
+                end
+
+                FINISH: begin
+                    cwr  <= 0;
+                    if (cnt == 0) cnt <= cnt + 1; 
+                    else begin busy <= 0; current_state <= IDLE; end
+                end
+                default: current_state <= IDLE;
+            endcase
+        end
+    end
+endmodule
